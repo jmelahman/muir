@@ -38,6 +38,7 @@ Each top-level directory holding a `.SRCINFO` is one tracked package. The repo
 | `tools/tests/` | unit tests + fixtures (`python tools/tests/run.py`) |
 | `.github/workflows/sync.yml` | scheduled detector |
 | `.github/workflows/audit.yml` | PR CI: `triage` → `audit` → `build-check` → `gate` |
+| `.github/workflows/terraform.yml` | PR check: `terraform fmt -check` + `validate` (CI-provisioned, no local deps) |
 | `terraform/` | repo config: branch protection, labels, auto-merge, Actions vars |
 
 ## Audit backend

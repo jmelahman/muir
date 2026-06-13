@@ -1,0 +1,45 @@
+name: terraform
+
+# Validates the Terraform module on PRs. Runs on every PR (no path filter) so
+# the `terraform` status check always reports and can be required in branch
+# protection without blocking PRs that don't touch terraform/. The heavy steps
+# self-skip when terraform/ is unchanged. Tools are provisioned on the runner,
+# so nothing needs to be installed locally.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: changed
+        name: Detect terraform/ changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --name-only "$BASE...HEAD" | grep -q '^terraform/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No terraform/ changes — skipping fmt/validate."
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.changed.outputs.changed == 'true'
+        with:
+          terraform_wrapper: false
+
+      - name: fmt + validate
+        if: steps.changed.outputs.changed == 'true'
+        working-directory: terraform
+        run: |
+          terraform fmt -check -recursive -diff
+          terraform init -backend=false -input=false   # installs providers, skips state backend
+          terraform validate

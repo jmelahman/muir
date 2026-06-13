@@ -17,9 +17,9 @@ variable "default_branch" {
 }
 
 variable "required_status_checks" {
-  description = "Status checks that must pass before merge. `gate` aggregates the matrix audit/build jobs."
+  description = "Status checks that must pass before merge. `gate` aggregates the matrix audit/build jobs; `terraform` validates this module."
   type        = list(string)
-  default     = ["gate"]
+  default     = ["gate", "terraform"]
 }
 
 variable "require_human_review" {

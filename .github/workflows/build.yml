@@ -1,0 +1,176 @@
+name: build
+
+# Build vetted packages into a signed pacman repo published on GitHub Releases.
+#
+# Trust model: this runs on push to master, and nothing reaches master without
+# passing the `gate` audit — so every build input is already vetted. Build-time
+# dependencies resolve ONLY from the official repos and the muir repo itself
+# (also vetted); if a package needs an AUR dep not yet in muir, the build fails
+# rather than pulling it un-vetted.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "*/PKGBUILD"
+      - "*/.SRCINFO"
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Space-separated package dirs to build (empty = all tracked)"
+        default: ""
+
+# Serialize repo-db updates across runs — the .db is shared mutable state.
+concurrency:
+  group: muir-repo
+  cancel-in-progress: false
+
+permissions:
+  contents: write # upload release assets
+
+env:
+  REPO_NAME: muir
+  RELEASE_TAG: repo
+  PACMAN_ARCH: x86_64
+
+jobs:
+  # ---- which package dirs to build ----------------------------------------
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: list
+        env:
+          INPUT_PKGS: ${{ inputs.packages }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          tracked() { for d in */; do [ -f "${d}.SRCINFO" ] && echo "${d%/}"; done; }
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$INPUT_PKGS" ]; then
+            list=$(printf '%s\n' $INPUT_PKGS)
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            list=$(tracked)
+          else
+            list=$(git diff --name-only "$BEFORE" "${{ github.sha }}" \
+                    | awk -F/ 'NF>1 {print $1}' | sort -u \
+                    | while read -r d; do [ -f "$d/.SRCINFO" ] && echo "$d"; done)
+          fi
+          pkgs=$(printf '%s\n' $list | sed '/^$/d' | jq -R . | jq -cs .)
+          echo "packages=${pkgs:-[]}" >> "$GITHUB_OUTPUT"
+
+  # ---- build (+nothing else) each package in a clean Arch container --------
+  build:
+    needs: plan
+    if: needs.plan.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: ${{ fromJson(needs.plan.outputs.packages) }}
+    steps:
+      - name: Base tooling
+        run: pacman -Syu --noconfirm --needed base-devel git sudo
+
+      - uses: actions/checkout@v4
+
+      - name: Point pacman at the muir repo (vetted build deps)
+        run: |
+          cat >> /etc/pacman.conf <<EOF
+
+          [${REPO_NAME}]
+          SigLevel = Optional TrustAll
+          Server = https://github.com/${{ github.repository_owner }}/${REPO_NAME}/releases/download/${RELEASE_TAG}
+          EOF
+          # First-ever run: repo may not exist yet — don't fail the sync.
+          pacman -Sy --noconfirm || true
+
+      - name: Build (unprivileged user; deps from official + muir only)
+        run: |
+          useradd -m builder
+          printf 'builder ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/builder
+          install -d -o builder /build
+          cp -rT "${{ matrix.pkg }}" /build/pkg
+          chown -R builder /build/pkg
+          # -s pulls missing deps via pacman: official repos + [muir]. An AUR dep
+          # not present in either makes this fail (the vetted-closure guarantee).
+          # Checksums are still enforced; --skippgpcheck avoids needing upstream
+          # keyrings (source changes were already reviewed by the audit).
+          sudo -u builder bash -lc 'cd /build/pkg && makepkg -s --noconfirm --clean --skippgpcheck'
+          mkdir -p out && cp /build/pkg/*.pkg.tar.zst out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.pkg }}
+          path: out/*.pkg.tar.zst
+          if-no-files-found: error
+
+  # ---- sign, update the repo db, publish to the Release --------------------
+  publish:
+    needs: [plan, build]
+    if: needs.plan.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - run: pacman -Syu --noconfirm --needed pacman github-cli gnupg
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: incoming
+          pattern: pkg-*
+          merge-multiple: true
+
+      - name: Import signing key
+        env:
+          GPG_KEY: ${{ secrets.MUIR_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.MUIR_GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_KEY" | gpg --batch --import
+          KEYID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')
+          echo "GPG_KEYID=$KEYID" >> "$GITHUB_ENV"
+          # allow non-interactive signing
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf || true
+
+      - name: Sign packages
+        run: |
+          cd incoming
+          for p in *.pkg.tar.zst; do
+            gpg --batch --yes --pinentry-mode loopback \
+                ${GPG_PASSPHRASE:+--passphrase "$GPG_PASSPHRASE"} \
+                --detach-sign --use-agent --no-armor -u "$GPG_KEYID" "$p"
+          done
+        env:
+          GPG_PASSPHRASE: ${{ secrets.MUIR_GPG_PASSPHRASE }}
+
+      - name: Fetch current repo db (if any)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p repo
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 \
+            || gh release create "$RELEASE_TAG" --title "muir pacman repo" \
+                 --notes "Signed, vetted AUR builds. Add as a [muir] pacman repo."
+          gh release download "$RELEASE_TAG" --dir repo \
+            --pattern "${REPO_NAME}.db.tar.zst" --pattern "${REPO_NAME}.files.tar.zst" || true
+
+      - name: repo-add (+sign db) and assemble assets
+        run: |
+          cp incoming/*.pkg.tar.zst incoming/*.pkg.tar.zst.sig repo/
+          cd repo
+          repo-add --sign --key "$GPG_KEYID" "${REPO_NAME}.db.tar.zst" *.pkg.tar.zst
+          # pacman fetches `${REPO_NAME}.db` / `.files` — make real files (not symlinks) for the Release.
+          cp -fL "${REPO_NAME}.db.tar.zst" "${REPO_NAME}.db"
+          cp -fL "${REPO_NAME}.db.tar.zst.sig" "${REPO_NAME}.db.sig"
+          cp -fL "${REPO_NAME}.files.tar.zst" "${REPO_NAME}.files"
+
+      - name: Upload to the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd repo
+          gh release upload "$RELEASE_TAG" --clobber \
+            *.pkg.tar.zst *.pkg.tar.zst.sig \
+            "${REPO_NAME}.db" "${REPO_NAME}.db.sig" "${REPO_NAME}.db.tar.zst" "${REPO_NAME}.db.tar.zst.sig" \
+            "${REPO_NAME}.files" "${REPO_NAME}.files.tar.zst"

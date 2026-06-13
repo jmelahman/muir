@@ -21,7 +21,12 @@ LLM security audit and are held for human review if flagged.
                                           │            flagged ────▶ FAIL +    │
                                           │                          label     │
                                           │ build-check  (secret-free sandbox) │
-                                          └────────────────────────────────────┘
+                                          └──────────────┬─────────────────────┘
+                                            merge (vetted)│
+                                                          ▼
+                                   build.yml: makepkg + GPG-sign → [muir] pacman
+                                   repo on GitHub Releases → `yay -Syu` installs
+                                   only these vetted builds
 ```
 
 Each top-level directory holding a `.SRCINFO` is one tracked package. The repo
@@ -39,8 +44,10 @@ Each top-level directory holding a `.SRCINFO` is one tracked package. The repo
 | `.github/workflows/sync.yml` | scheduled detector |
 | `.github/workflows/audit.yml` | PR CI: `triage` → `audit` → `build-check` → `gate` |
 | `.github/workflows/terraform.yml` | PR check: `terraform fmt -check` + `validate` (CI-provisioned, no local deps) |
+| `.github/workflows/build.yml` | on merge: build + GPG-sign vetted packages → publish `[muir]` pacman repo |
 | `terraform/` | repo config: branch protection, labels, auto-merge, Actions vars |
-| `contrib/` | seed from installed packages; systemd timer / pacman hook for new installs |
+| `contrib/` | seed from installed packages; systemd timer; `muir.conf` pacman repo stanza |
+| `keys/` | signing public key + key setup instructions |
 
 ## Audit backend
 
@@ -77,6 +84,8 @@ variables) is managed by Terraform — see [`terraform/`](terraform/). Then:
    - `MUIR_PR_TOKEN` — PAT with `contents`+`pull-requests` write. Required so
      sync's PRs trigger CI (PRs opened with the default `GITHUB_TOKEN` do not).
    - one backend credential from the table above.
+   - `MUIR_GPG_PRIVATE_KEY` (+ `MUIR_GPG_PASSPHRASE` if set) — signing key for the
+     binary repo. Generate per [`keys/`](keys/).
 3. **Branch protection** — Terraform requires the single `gate` check (it
    aggregates the per-package matrix jobs) and enables auto-merge.
 
@@ -90,6 +99,36 @@ The `build-check` job executes untrusted PKGBUILD code (`makepkg`, `namcap`) and
 therefore has **no secrets** — no `ANTHROPIC_API_KEY`, no write token. The
 `audit` job holds the API key but only ever reads the diff as text; it never runs
 package code. This keeps a malicious PKGBUILD from exfiltrating credentials.
+
+## Installing the vetted builds (the actual gate)
+
+When a vetted update merges to `master`, `build.yml` builds it (deps resolved
+**only** from the official repos + the muir repo itself — an un-vetted AUR build
+dep fails the build), GPG-signs it, and publishes it to a `[muir]` pacman repo on
+GitHub Releases. Point your system at it so `yay -Syu` installs *only* these
+vetted builds instead of building from the AUR:
+
+```sh
+# 1. Trust the signing key (see keys/)
+sudo pacman-key --add keys/muir.pub && sudo pacman-key --lsign-key <KEYID>
+
+# 2. Add the repo (stanza in contrib/muir.conf)
+cat contrib/muir.conf | sudo tee -a /etc/pacman.conf
+
+# 3. Use it
+sudo pacman -Syu        # or: yay -Syu
+```
+
+Because these package names now resolve from the `[muir]` repo, `pacman`/`yay`
+upgrade them from your signed builds and never touch the AUR for them — so an
+update can only land on your machine after it passed the audit and was built
+from the vetted source. Kick off the first full build with the `build` workflow's
+**Run workflow** button (or it triggers automatically as updates merge).
+
+> Caveat: if two packages in the *same* merge depend on each other and neither is
+> in the repo yet, the dependent build fails until the dependency's build
+> publishes — re-run `build` (or it self-heals on the next merge). Single-package
+> updates (the common case) are unaffected.
 
 ## Local development
 

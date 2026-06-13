@@ -1,8 +1,8 @@
-# miur — AUR Mirror with LLM-Audited Update PRs
+# muir — AUR Mirror with LLM-Audited Update PRs
 
 ## Context
 
-`miur` ("My Arch User Repository") should be a **security-vetting source mirror** of a chosen set
+`muir` ("My Arch User Repository") should be a **security-vetting source mirror** of a chosen set
 of AUR packages. AUR packages are arbitrary bash scripts (`PKGBUILD` + `.install` hooks) that run
 with the user's privileges during `makepkg`, so the real value of a mirror is a **supply-chain
 gate**: every time an upstream package changes, the change should be reviewed before it lands.

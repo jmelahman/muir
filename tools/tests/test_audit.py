@@ -7,14 +7,14 @@ import audit  # noqa: E402
 
 
 def _clear_env(monkeysetenv=None):
-    for k in ("MIUR_AUDIT_BACKEND", "OPENROUTER_API_KEY",
+    for k in ("MUIR_AUDIT_BACKEND", "OPENROUTER_API_KEY",
               "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
         os.environ.pop(k, None)
 
 
 def test_resolve_backend_explicit_override():
     _clear_env()
-    os.environ["MIUR_AUDIT_BACKEND"] = "claude-cli"
+    os.environ["MUIR_AUDIT_BACKEND"] = "claude-cli"
     os.environ["OPENROUTER_API_KEY"] = "x"  # ignored when forced
     try:
         assert audit.resolve_backend() == "claude-cli"

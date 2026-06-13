@@ -64,7 +64,7 @@ jobs:
           path: triage-${{ matrix.pkg }}.json
 
   # ---- LLM audit (runs always; self-skips when triage says low risk) -------
-  # Backend is selected by `MIUR_AUDIT_BACKEND` (repo variable), default
+  # Backend is selected by `MUIR_AUDIT_BACKEND` (repo variable), default
   # openrouter. audit.py auto-detects from available credentials otherwise.
   audit:
     needs: [detect, triage]
@@ -72,8 +72,8 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     env:
-      MIUR_AUDIT_BACKEND: ${{ vars.MIUR_AUDIT_BACKEND || 'openrouter' }}
-      MIUR_AUDIT_MODEL: ${{ vars.MIUR_AUDIT_MODEL }}
+      MUIR_AUDIT_BACKEND: ${{ vars.MUIR_AUDIT_BACKEND || 'openrouter' }}
+      MUIR_AUDIT_MODEL: ${{ vars.MUIR_AUDIT_MODEL }}
     strategy:
       matrix:
         pkg: ${{ fromJson(needs.detect.outputs.packages) }}
@@ -89,13 +89,13 @@ jobs:
           name: triage-${{ matrix.pkg }}
       # Only the subscription-token backend needs the Claude CLI (Node).
       - name: Install Claude CLI
-        if: env.MIUR_AUDIT_BACKEND == 'claude-cli'
+        if: env.MUIR_AUDIT_BACKEND == 'claude-cli'
         run: |
           pacman -S --noconfirm --needed nodejs npm
           npm install -g @anthropic-ai/claude-code
       # Only the direct Anthropic backend needs the SDK.
       - name: Install Anthropic SDK
-        if: env.MIUR_AUDIT_BACKEND == 'anthropic'
+        if: env.MUIR_AUDIT_BACKEND == 'anthropic'
         run: |
           pacman -S --noconfirm --needed python-pip
           python -m venv /opt/venv && /opt/venv/bin/pip install -q anthropic

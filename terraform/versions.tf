@@ -15,7 +15,7 @@ terraform {
   #
   # backend "s3" {
   #   bucket         = "my-tf-state"
-  #   key            = "miur/terraform.tfstate"
+  #   key            = "muir/terraform.tfstate"
   #   region         = "us-east-1"
   #   dynamodb_table = "tf-locks"
   #   encrypt        = true
@@ -23,11 +23,11 @@ terraform {
   #
   # backend "gcs" {
   #   bucket = "my-tf-state"
-  #   prefix = "miur"
+  #   prefix = "muir"
   # }
   #
   # cloud {                       # Terraform Cloud / HCP
   #   organization = "my-org"
-  #   workspaces { name = "miur" }
+  #   workspaces { name = "muir" }
   # }
 }

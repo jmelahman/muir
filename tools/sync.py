@@ -48,7 +48,7 @@ def load_archive(cache_dir: Optional[str] = None) -> Dict[str, dict]:
     etag_path = os.path.join(cache_dir, "archive.etag") if cache_dir else None
     body_path = os.path.join(cache_dir, "archive.json.gz") if cache_dir else None
 
-    headers = {"User-Agent": "miur-sync"}
+    headers = {"User-Agent": "muir-sync"}
     if etag_path and os.path.exists(etag_path) and body_path and os.path.exists(body_path):
         with open(etag_path) as fh:
             headers["If-None-Match"] = fh.read().strip()
@@ -295,7 +295,7 @@ def add_packages(repo_root: str, names: List[str], index: Dict[str, dict]) -> No
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo-root", default=os.getcwd())
-    ap.add_argument("--cache-dir", default=os.environ.get("MIUR_CACHE", ".cache"))
+    ap.add_argument("--cache-dir", default=os.environ.get("MUIR_CACHE", ".cache"))
     ap.add_argument("--base", default="master")
     ap.add_argument("--dry-run", action="store_true",
                     help="report pending updates without writing anything")

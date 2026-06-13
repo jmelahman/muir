@@ -44,16 +44,16 @@ jobs:
         env:
           # Use a PAT so the opened PR triggers the audit workflow.
           # PRs created with the default GITHUB_TOKEN do NOT trigger CI.
-          GH_TOKEN: ${{ secrets.MIUR_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MUIR_PR_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global user.name  "miur-bot"
-          git config --global user.email "miur-bot@users.noreply.github.com"
+          git config --global user.name  "muir-bot"
+          git config --global user.email "muir-bot@users.noreply.github.com"
 
       - name: Detect + open update PRs
         env:
-          GH_TOKEN: ${{ secrets.MIUR_PR_TOKEN || secrets.GITHUB_TOKEN }}
-          MIUR_CACHE: .cache
+          GH_TOKEN: ${{ secrets.MUIR_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          MUIR_CACHE: .cache
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             python tools/sync.py --dry-run

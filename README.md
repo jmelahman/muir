@@ -1,4 +1,4 @@
-# miur — My Arch User Repository
+# muir — My Arch User Repository
 
 A **security-vetting source mirror** of selected AUR packages. A bot detects
 upstream AUR updates, opens one PR per update, and CI audits the *diff*: cheap
@@ -42,12 +42,12 @@ Each top-level directory holding a `.SRCINFO` is one tracked package. The repo
 
 ## Audit backend
 
-`tools/audit.py` is provider-pluggable; it picks a backend by `MIUR_AUDIT_BACKEND`
+`tools/audit.py` is provider-pluggable; it picks a backend by `MUIR_AUDIT_BACKEND`
 (repo Actions variable) or auto-detects from whichever credential is present:
 
 | Backend | Credential | Notes |
 |---|---|---|
-| `openrouter` (default) | `OPENROUTER_API_KEY` | OpenAI-compatible, one key → many models. Stdlib only (no install in CI). Set the model via `MIUR_AUDIT_MODEL` (an OpenRouter slug). |
+| `openrouter` (default) | `OPENROUTER_API_KEY` | OpenAI-compatible, one key → many models. Stdlib only (no install in CI). Set the model via `MUIR_AUDIT_MODEL` (an OpenRouter slug). |
 | `claude-cli` | `CLAUDE_CODE_OAUTH_TOKEN` | Headless `claude -p` on your Claude **subscription** — no metered API key. Token from `claude setup-token`. |
 | `anthropic` | `ANTHROPIC_API_KEY` | Direct Anthropic API (SDK, structured output, prompt caching). |
 
@@ -64,7 +64,7 @@ variables) is managed by Terraform — see [`terraform/`](terraform/). Then:
 1. **Seed packages** (one-off): `python tools/sync.py --add <pkg> [<pkg>...]`,
    then commit the new directories.
 2. **Secrets** (set with `gh secret set …` — *not* in Terraform state):
-   - `MIUR_PR_TOKEN` — PAT with `contents`+`pull-requests` write. Required so
+   - `MUIR_PR_TOKEN` — PAT with `contents`+`pull-requests` write. Required so
      sync's PRs trigger CI (PRs opened with the default `GITHUB_TOKEN` do not).
    - one backend credential from the table above.
 3. **Branch protection** — Terraform requires the single `gate` check (it

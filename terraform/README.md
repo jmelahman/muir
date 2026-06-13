@@ -1,6 +1,6 @@
 # Terraform — repository configuration
 
-Manages the GitHub repository config for `miur` with the
+Manages the GitHub repository config for `muir` with the
 [`integrations/github`](https://registry.terraform.io/providers/integrations/github/latest)
 provider: repository settings (auto-merge, squash-only), branch protection (the
 `gate` required check), labels, and the non-secret Actions variables the audit
@@ -29,7 +29,7 @@ terraform apply
 | `github_repository.this` | auto-merge on, squash-only, delete branch on merge |
 | `github_branch_protection.default` | require the `gate` status check (and CODEOWNERS review if `require_human_review = true`) |
 | `github_issue_label.this` | `risk:low`, `risk:high`, `audit:flagged` |
-| `github_actions_variable.*` | `MIUR_AUDIT_BACKEND`, `MIUR_AUDIT_MODEL` |
+| `github_actions_variable.*` | `MUIR_AUDIT_BACKEND`, `MUIR_AUDIT_MODEL` |
 
 ## Merge gate
 
@@ -45,7 +45,7 @@ Resources-only by design, so no plaintext secrets touch Terraform state. Set the
 ones your chosen backend needs:
 
 ```sh
-gh secret set MIUR_PR_TOKEN            # PAT so sync's PRs trigger CI (always)
+gh secret set MUIR_PR_TOKEN            # PAT so sync's PRs trigger CI (always)
 gh secret set OPENROUTER_API_KEY       # backend=openrouter
 gh secret set CLAUDE_CODE_OAUTH_TOKEN  # backend=claude-cli (subscription, no metered key)
 gh secret set ANTHROPIC_API_KEY        # backend=anthropic

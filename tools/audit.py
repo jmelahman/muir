@@ -7,10 +7,10 @@ structured verdict (clean / suspicious / malicious).  The verdict drives the PR
 check: ``clean`` passes (PR stays auto-merge-eligible); anything else fails the
 check, posts the findings, and labels the PR for human review.
 
-Pluggable backend (auto-detected, or forced via ``MIUR_AUDIT_BACKEND``):
+Pluggable backend (auto-detected, or forced via ``MUIR_AUDIT_BACKEND``):
 
   openrouter   OpenAI-compatible HTTP (stdlib only). Needs OPENROUTER_API_KEY.
-               Model via MIUR_AUDIT_MODEL (an OpenRouter slug).
+               Model via MUIR_AUDIT_MODEL (an OpenRouter slug).
   claude-cli   Headless ``claude -p`` using a Claude subscription token
                (CLAUDE_CODE_OAUTH_TOKEN) — no metered API key. Needs the
                `claude` CLI on PATH.
@@ -32,10 +32,10 @@ import sys
 import urllib.request
 from typing import List, Optional
 
-# Default model per backend (override with MIUR_AUDIT_MODEL).
+# Default model per backend (override with MUIR_AUDIT_MODEL).
 ANTHROPIC_MODEL = "claude-opus-4-8"
 # OpenRouter slug — verify against https://openrouter.ai/models and override
-# via MIUR_AUDIT_MODEL if this slug has moved.
+# via MUIR_AUDIT_MODEL if this slug has moved.
 OPENROUTER_DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -130,7 +130,7 @@ def build_user_content(pkg: str, diff: str, triage: dict) -> str:
 
 def resolve_backend() -> str:
     """Pick a backend: explicit override, else by available credentials."""
-    forced = os.environ.get("MIUR_AUDIT_BACKEND")
+    forced = os.environ.get("MUIR_AUDIT_BACKEND")
     if forced:
         return forced
     if os.environ.get("OPENROUTER_API_KEY"):
@@ -155,7 +155,7 @@ def run_audit(pkg: str, diff: str, triage: dict) -> dict:
     elif backend == "anthropic":
         verdict = _audit_anthropic(user)
     else:
-        raise RuntimeError(f"unknown MIUR_AUDIT_BACKEND: {backend!r}")
+        raise RuntimeError(f"unknown MUIR_AUDIT_BACKEND: {backend!r}")
     _validate(verdict)
     return verdict
 
@@ -196,7 +196,7 @@ def _extract_json(text: str) -> dict:
 
 
 def _audit_openrouter(user: str) -> dict:
-    model = os.environ.get("MIUR_AUDIT_MODEL", OPENROUTER_DEFAULT_MODEL)
+    model = os.environ.get("MUIR_AUDIT_MODEL", OPENROUTER_DEFAULT_MODEL)
     payload = {
         "model": model,
         "messages": [
@@ -217,7 +217,7 @@ def _audit_openrouter(user: str) -> dict:
         headers={
             "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
             "Content-Type": "application/json",
-            "X-Title": "miur-audit",
+            "X-Title": "muir-audit",
         },
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
@@ -237,7 +237,7 @@ def _audit_claude_cli(user: str) -> dict:
         "--output-format", "json",
         "--max-turns", "1",
     ]
-    model = os.environ.get("MIUR_AUDIT_MODEL")
+    model = os.environ.get("MUIR_AUDIT_MODEL")
     if model:
         cmd += ["--model", model]
     res = subprocess.run(cmd, capture_output=True, text=True)
@@ -254,7 +254,7 @@ def _audit_anthropic(user: str) -> dict:
 
     client = anthropic.Anthropic()
     response = client.messages.create(
-        model=os.environ.get("MIUR_AUDIT_MODEL", ANTHROPIC_MODEL),
+        model=os.environ.get("MUIR_AUDIT_MODEL", ANTHROPIC_MODEL),
         max_tokens=16000,
         thinking={"type": "adaptive"},
         output_config={

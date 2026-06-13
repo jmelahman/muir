@@ -34,7 +34,7 @@ variable "require_human_review" {
 }
 
 variable "audit_backend" {
-  description = "LLM backend for the audit (repo Actions variable MIUR_AUDIT_BACKEND)."
+  description = "LLM backend for the audit (repo Actions variable MUIR_AUDIT_BACKEND)."
   type        = string
   default     = "openrouter"
   validation {
@@ -44,7 +44,7 @@ variable "audit_backend" {
 }
 
 variable "audit_model" {
-  description = "Optional model override (Actions variable MIUR_AUDIT_MODEL). Empty = backend default."
+  description = "Optional model override (Actions variable MUIR_AUDIT_MODEL). Empty = backend default."
   type        = string
   default     = ""
 }

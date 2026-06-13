@@ -59,7 +59,7 @@ resource "github_issue_label" "this" {
 # Non-secret Actions configuration consumed by .github/workflows/audit.yml.
 resource "github_actions_variable" "audit_backend" {
   repository    = github_repository.this.name
-  variable_name = "MIUR_AUDIT_BACKEND"
+  variable_name = "MUIR_AUDIT_BACKEND"
   value         = var.audit_backend
 }
 
@@ -67,7 +67,7 @@ resource "github_actions_variable" "audit_model" {
   count = var.audit_model == "" ? 0 : 1
 
   repository    = github_repository.this.name
-  variable_name = "MIUR_AUDIT_MODEL"
+  variable_name = "MUIR_AUDIT_MODEL"
   value         = var.audit_model
 }
 
@@ -75,7 +75,7 @@ resource "github_actions_variable" "audit_model" {
 # Secrets are intentionally NOT managed here (resources-only) so plaintext
 # never lands in Terraform state. Set them out of band, e.g.:
 #
-#   gh secret set MIUR_PR_TOKEN            # PAT so sync PRs trigger CI
+#   gh secret set MUIR_PR_TOKEN            # PAT so sync PRs trigger CI
 #   gh secret set OPENROUTER_API_KEY       # backend=openrouter
 #   gh secret set CLAUDE_CODE_OAUTH_TOKEN  # backend=claude-cli (subscription)
 #   gh secret set ANTHROPIC_API_KEY        # backend=anthropic

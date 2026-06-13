@@ -1,153 +1,43 @@
 # muir — My Arch User Repository
 
-A **security-vetting source mirror** of selected AUR packages. A bot detects
-upstream AUR updates, opens one PR per update, and CI audits the *diff*: cheap
-version bumps flow through automatically, while changes that touch the real
-attack surface (sources, checksums, build/install code, dependencies) get a full
-LLM security audit and are held for human review if flagged.
+A security-vetting mirror for the AUR packages you use. When a tracked package
+changes upstream, a bot opens a PR and an LLM audits the diff; only audit-clean
+changes merge, then get built into a **signed pacman repo**. Net effect:
+`yay -Syu` installs **only vetted, signed builds** — never raw from the AUR.
 
-## Adopt it (fork-and-go)
+**Pipeline:** detect update → PR → triage + LLM audit (`gate`) → merge if clean
+→ build + GPG-sign → publish `[muir]` repo on GitHub Releases.
 
-1. **Use this template** (GitHub "Use this template" button) or fork it.
-2. Clone your copy and run **`./bootstrap.sh`** — it reads your fork's `origin`
-   remote and fills the only fork-specific spots: `CODEOWNERS`,
-   `terraform/terraform.tfvars`, and the pacman repo stanza
-   (`contrib/pacman-repo.conf`).
-3. Do the [Setup](#setup) (secrets + `terraform apply` + seed).
+## Adopt (fork-and-go)
 
-Everything else derives from your repo automatically: the workflows use your
-fork's `github.repository_owner`, and the pacman repo name follows your repo
-name. Nothing is hardcoded to the original owner.
+1. **Use this template** / fork it.
+2. `git clone … && ./bootstrap.sh` — rewrites `CODEOWNERS`, Terraform vars, and
+   the pacman stanza from your fork's remote. Everything else derives from the
+   repo automatically.
+3. **Secrets** (`gh secret set …`): `MUIR_PR_TOKEN` (PAT for PRs), one audit
+   backend key — `OPENROUTER_API_KEY` *or* `CLAUDE_CODE_OAUTH_TOKEN` *or*
+   `ANTHROPIC_API_KEY` — and `MUIR_GPG_PRIVATE_KEY` (signing; see [`keys/`](keys/)).
+4. **Configure the repo**: `cd terraform && terraform init &&
+   terraform import github_repository.this <repo> && terraform apply`.
+5. **Seed** from this machine: `python tools/sync.py --from-installed`, then
+   commit + push. Enable the timer in [`contrib/`](contrib/) to track new installs.
 
-## How it works
+## Use the repo
 
-```
-                 hourly cron
- AUR metadata  ────────────────▶  tools/sync.py  ──▶  PR  ──┐
- archive (1 GET)                  (vercmp vs .SRCINFO)       │
-                                                            ▼
-                                          ┌──────── PR CI (audit.yml) ────────┐
-                                          │ triage.py  field-based risk        │
-                                          │   risk:low ─────────────▶ pass     │
-                                          │   high ─▶ audit.py (Claude)        │
-                                          │            clean ──────▶ pass      │
-                                          │            flagged ────▶ FAIL +    │
-                                          │                          label     │
-                                          │ build-check  (secret-free sandbox) │
-                                          └──────────────┬─────────────────────┘
-                                            merge (vetted)│
-                                                          ▼
-                                   build.yml: makepkg + GPG-sign → [muir] pacman
-                                   repo on GitHub Releases → `yay -Syu` installs
-                                   only these vetted builds
+```sh
+sudo pacman-key --add keys/signing.pub && sudo pacman-key --lsign-key <KEYID>
+cat contrib/pacman-repo.conf | sudo tee -a /etc/pacman.conf
+yay -Syu        # installs the vetted, signed builds
 ```
 
-Each top-level directory holding a `.SRCINFO` is one tracked package. The repo
-*is* the mirror state — files are copied verbatim from
-`https://aur.archlinux.org/<pkg>.git`.
+## Layout
 
 | Path | Role |
 |---|---|
-| `<pkg>/` | mirrored `PKGBUILD`, `.SRCINFO`, `*.install`, plus a `.aurmeta` sidecar |
-| `tools/sync.py` | detect updates (metadata archive + `vercmp`) and open PRs |
-| `tools/triage.py` | deterministic field-based risk classifier |
-| `tools/audit.py` | Claude diff audit → structured verdict + PR check |
-| `tools/lib/` | `.SRCINFO` parsing, `vercmp`, PKGBUILD function extraction |
-| `tools/tests/` | unit tests + fixtures (`python tools/tests/run.py`) |
-| `.github/workflows/sync.yml` | scheduled detector |
-| `.github/workflows/audit.yml` | PR CI: `triage` → `audit` → `build-check` → `gate` |
-| `.github/workflows/terraform.yml` | PR check: `terraform fmt -check` + `validate` (CI-provisioned, no local deps) |
-| `.github/workflows/build.yml` | on merge: build + GPG-sign vetted packages → publish `[muir]` pacman repo |
-| `terraform/` | repo config: branch protection, labels, auto-merge, Actions vars |
-| `contrib/` | seed from installed packages; systemd timer; pacman repo stanza template |
-| `keys/` | signing public key + key setup instructions |
-| `bootstrap.sh` | fill fork-specific spots (CODEOWNERS, tfvars, pacman stanza) from the git remote |
+| `<pkg>/` | mirrored `PKGBUILD` / `.SRCINFO` / `*.install` (one dir per package) |
+| `tools/` | `sync` (detect/seed/PRs), `triage` (risk classifier), `audit` (LLM verdict) |
+| `.github/workflows/` | `sync` (cron) · `audit`→`gate` (PR gate) · `build` (sign+publish) · `terraform` |
+| `terraform/`, `contrib/`, `keys/` | repo config · seeding & new-install discovery · signing key |
+| `bootstrap.sh` | point a fresh fork at itself |
 
-## Audit backend
-
-`tools/audit.py` is provider-pluggable; it picks a backend by `MUIR_AUDIT_BACKEND`
-(repo Actions variable) or auto-detects from whichever credential is present:
-
-| Backend | Credential | Notes |
-|---|---|---|
-| `openrouter` (default) | `OPENROUTER_API_KEY` | OpenAI-compatible, one key → many models. Stdlib only (no install in CI). Set the model via `MUIR_AUDIT_MODEL` (an OpenRouter slug). |
-| `claude-cli` | `CLAUDE_CODE_OAUTH_TOKEN` | Headless `claude -p` on your Claude **subscription** — no metered API key. Token from `claude setup-token`. |
-| `anthropic` | `ANTHROPIC_API_KEY` | Direct Anthropic API (SDK, structured output, prompt caching). |
-
-A Claude PR *review* (via the Claude GitHub app/action) posts comments but cannot
-itself block a merge, so the deterministic `audit.py` exit code stays the gate;
-the subscription `claude-cli` backend is how you run that audit without a metered
-key.
-
-## Setup
-
-Repository configuration (branch protection, labels, auto-merge, Actions
-variables) is managed by Terraform — see [`terraform/`](terraform/). Then:
-
-1. **Seed packages** (one-off, on your Arch box): mirror everything you already
-   have installed —
-   ```sh
-   python tools/sync.py --from-installed --dry-run   # preview
-   python tools/sync.py --from-installed             # materialize, then commit + push
-   ```
-   `--from-installed` reads `pacman -Qmq`, resolves each to its AUR `pkgbase`,
-   skips non-AUR packages, and tracks the ones not already mirrored. For a single
-   named package use `--add <pkg>`. To keep new installs flowing in as audited
-   PRs, set up the systemd timer / pacman hook in [`contrib/`](contrib/).
-2. **Secrets** (set with `gh secret set …` — *not* in Terraform state):
-   - `MUIR_PR_TOKEN` — PAT with `contents`+`pull-requests` write. Required so
-     sync's PRs trigger CI (PRs opened with the default `GITHUB_TOKEN` do not).
-   - one backend credential from the table above.
-   - `MUIR_GPG_PRIVATE_KEY` (+ `MUIR_GPG_PASSPHRASE` if set) — signing key for the
-     binary repo. Generate per [`keys/`](keys/).
-3. **Branch protection** — Terraform requires the single `gate` check (it
-   aggregates the per-package matrix jobs) and enables auto-merge.
-
-With this in place: `risk:low` and audit-`clean` PRs satisfy `gate` and
-auto-merge; `suspicious`/`malicious` PRs fail `gate`, get the `audit:flagged`
-label and a findings comment, and are held until a maintainer acts.
-
-### Security boundary
-
-The `build-check` job executes untrusted PKGBUILD code (`makepkg`, `namcap`) and
-therefore has **no secrets** — no `ANTHROPIC_API_KEY`, no write token. The
-`audit` job holds the API key but only ever reads the diff as text; it never runs
-package code. This keeps a malicious PKGBUILD from exfiltrating credentials.
-
-## Installing the vetted builds (the actual gate)
-
-When a vetted update merges to `master`, `build.yml` builds it (deps resolved
-**only** from the official repos + the muir repo itself — an un-vetted AUR build
-dep fails the build), GPG-signs it, and publishes it to a `[muir]` pacman repo on
-GitHub Releases. Point your system at it so `yay -Syu` installs *only* these
-vetted builds instead of building from the AUR:
-
-```sh
-# 1. Trust the signing key (see keys/)
-sudo pacman-key --add keys/signing.pub && sudo pacman-key --lsign-key <KEYID>
-
-# 2. Add the repo (stanza generated by bootstrap.sh)
-cat contrib/pacman-repo.conf | sudo tee -a /etc/pacman.conf
-
-# 3. Use it
-sudo pacman -Syu        # or: yay -Syu
-```
-
-Because these package names now resolve from the `[muir]` repo, `pacman`/`yay`
-upgrade them from your signed builds and never touch the AUR for them — so an
-update can only land on your machine after it passed the audit and was built
-from the vetted source. Kick off the first full build with the `build` workflow's
-**Run workflow** button (or it triggers automatically as updates merge).
-
-> Caveat: if two packages in the *same* merge depend on each other and neither is
-> in the repo yet, the dependent build fails until the dependency's build
-> publishes — re-run `build` (or it self-heals on the next merge). Single-package
-> updates (the common case) are unaffected.
-
-## Local development
-
-```sh
-python tools/tests/run.py          # unit tests (no deps)
-python tools/sync.py --dry-run     # detect pending updates, write nothing
-python tools/triage.py --old-dir A --new-dir B   # classify a diff
-```
+Detail lives in each subdirectory's README. Tests: `python tools/tests/run.py`.

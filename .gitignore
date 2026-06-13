@@ -12,3 +12,4 @@
 
 pkg/
 src/
+.claude/settings.local.json

@@ -40,6 +40,7 @@ Each top-level directory holding a `.SRCINFO` is one tracked package. The repo
 | `.github/workflows/audit.yml` | PR CI: `triage` → `audit` → `build-check` → `gate` |
 | `.github/workflows/terraform.yml` | PR check: `terraform fmt -check` + `validate` (CI-provisioned, no local deps) |
 | `terraform/` | repo config: branch protection, labels, auto-merge, Actions vars |
+| `contrib/` | seed from installed packages; systemd timer / pacman hook for new installs |
 
 ## Audit backend
 
@@ -62,8 +63,16 @@ key.
 Repository configuration (branch protection, labels, auto-merge, Actions
 variables) is managed by Terraform — see [`terraform/`](terraform/). Then:
 
-1. **Seed packages** (one-off): `python tools/sync.py --add <pkg> [<pkg>...]`,
-   then commit the new directories.
+1. **Seed packages** (one-off, on your Arch box): mirror everything you already
+   have installed —
+   ```sh
+   python tools/sync.py --from-installed --dry-run   # preview
+   python tools/sync.py --from-installed             # materialize, then commit + push
+   ```
+   `--from-installed` reads `pacman -Qmq`, resolves each to its AUR `pkgbase`,
+   skips non-AUR packages, and tracks the ones not already mirrored. For a single
+   named package use `--add <pkg>`. To keep new installs flowing in as audited
+   PRs, set up the systemd timer / pacman hook in [`contrib/`](contrib/).
 2. **Secrets** (set with `gh secret set …` — *not* in Terraform state):
    - `MUIR_PR_TOKEN` — PAT with `contents`+`pull-requests` write. Required so
      sync's PRs trigger CI (PRs opened with the default `GITHUB_TOKEN` do not).

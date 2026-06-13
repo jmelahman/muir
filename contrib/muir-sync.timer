@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically mirror newly-installed AUR packages to muir
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

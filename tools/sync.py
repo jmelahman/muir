@@ -227,9 +227,9 @@ def detect(repo_root: str, index: Dict[str, dict]) -> List[dict]:
     return updates
 
 
-def open_update_pr(repo_root: str, update: dict, base: str = "master") -> Optional[str]:
-    pkg = update["pkg"]
-    branch = branch_name(pkg, update["new_version"])
+def _create_pr(repo_root: str, pkg: str, entry: Optional[dict], base: str,
+               branch: str, title: str, body: str) -> Optional[str]:
+    """Branch from base, materialize the package, push, open an auto-merge PR."""
     if pr_exists(branch) or branch_exists_remote(branch):
         print(f"SKIP {pkg}: PR/branch {branch} already exists")
         return None
@@ -239,30 +239,46 @@ def open_update_pr(repo_root: str, update: dict, base: str = "master") -> Option
         commit = fetch_upstream(pkg, clone)
         subprocess.run(["git", "-C", repo_root, "checkout", "-B", branch, base],
                        check=True, capture_output=True, text=True)
-        materialize(clone, os.path.join(repo_root, pkg), update["entry"], commit)
+        materialize(clone, os.path.join(repo_root, pkg), entry, commit)
 
     subprocess.run(["git", "-C", repo_root, "add", "-A", pkg], check=True)
-    msg = f"{pkg}: {update['old_version']} -> {update['new_version']}"
-    subprocess.run(["git", "-C", repo_root, "commit", "-m", msg],
+    subprocess.run(["git", "-C", repo_root, "commit", "-m", title],
                    check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", repo_root, "push", "-u", "origin", branch],
                    check=True, capture_output=True, text=True)
 
-    body = _pr_body(update)
     res = subprocess.run(
         ["gh", "pr", "create", "--base", base, "--head", branch,
-         "--title", msg, "--body", body],
+         "--title", title, "--body", body],
         capture_output=True, text=True,
     )
     if res.returncode != 0:
         print(f"ERROR creating PR for {pkg}: {res.stderr}", file=sys.stderr)
         return None
     url = res.stdout.strip()
-    # Let GitHub auto-merge once required checks (triage/audit/build) pass.
+    # Let GitHub auto-merge once required checks (gate) pass.
     subprocess.run(["gh", "pr", "merge", "--auto", "--squash", branch],
                    capture_output=True, text=True)
     print(f"PR {pkg}: {url}")
     return url
+
+
+def open_update_pr(repo_root: str, update: dict, base: str = "master") -> Optional[str]:
+    pkg = update["pkg"]
+    title = f"{pkg}: {update['old_version']} -> {update['new_version']}"
+    return _create_pr(repo_root, pkg, update["entry"], base,
+                      branch_name(pkg, update["new_version"]), title, _pr_body(update))
+
+
+def open_add_pr(repo_root: str, pkg: str, entry: dict, base: str = "master") -> Optional[str]:
+    ver = entry.get("Version", "")
+    title = f"Add {pkg} ({ver})"
+    body = (
+        f"Import new AUR package **{pkg}** (`{ver}`, maintainer "
+        f"`{entry.get('Maintainer')}`).\n\n"
+        "First import — CI audits the full PKGBUILD as a high-risk change."
+    )
+    return _create_pr(repo_root, pkg, entry, base, f"add/{pkg}", title, body)
 
 
 def _pr_body(update: dict) -> str:
@@ -283,13 +299,45 @@ def _pr_body(update: dict) -> str:
 
 
 def add_packages(repo_root: str, names: List[str], index: Dict[str, dict]) -> None:
-    """Seed new tracked package dirs from upstream AUR (one-off, see plan)."""
+    """Seed new tracked package dirs from upstream AUR into the working tree."""
     for pkg in names:
         with tempfile.TemporaryDirectory() as tmp:
             clone = os.path.join(tmp, pkg)
             commit = fetch_upstream(pkg, clone)
             materialize(clone, os.path.join(repo_root, pkg), index.get(pkg), commit)
         print(f"ADDED {pkg}")
+
+
+# -- discovery from the local machine ------------------------------------------
+
+
+def installed_packages() -> List[str]:
+    """Foreign (AUR / manually installed) package names from ``pacman -Qmq``."""
+    res = subprocess.run(["pacman", "-Qmq"], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError("`pacman -Qmq` failed — run on an Arch system with pacman")
+    return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+
+
+def resolve_bases(names: List[str], index: Dict[str, dict]) -> List[str]:
+    """Map installed names to their AUR ``pkgbase``; skip non-AUR; dedup in order.
+
+    Split packages (e.g. ``foo-docs`` from base ``foo``) share one AUR git repo
+    named by ``pkgbase``, so we track the base, not each child name.
+    """
+    seen: set = set()
+    out: List[str] = []
+    for name in names:
+        entry = index.get(name)
+        if not entry:
+            print(f"SKIP {name}: not an AUR package (not in metadata archive)",
+                  file=sys.stderr)
+            continue
+        base = entry.get("PackageBase") or name
+        if base not in seen:
+            seen.add(base)
+            out.append(base)
+    return out
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -302,13 +350,34 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--open-prs", action="store_true",
                     help="actually create branches/PRs for pending updates")
     ap.add_argument("--add", nargs="+", metavar="PKG",
-                    help="seed new package dir(s) from upstream AUR and exit")
+                    help="seed specific package dir(s) from upstream AUR and exit")
+    ap.add_argument("--from-installed", action="store_true",
+                    help="track AUR packages installed on THIS machine "
+                         "(`pacman -Qmq`) that aren't mirrored yet")
     args = ap.parse_args(argv)
 
     index = load_archive(args.cache_dir)
 
     if args.add:
         add_packages(args.repo_root, args.add, index)
+        return 0
+
+    if args.from_installed:
+        bases = resolve_bases(installed_packages(), index)
+        tracked = set(tracked_packages(args.repo_root))
+        missing = [b for b in bases if b not in tracked]
+        if not missing:
+            print("all installed AUR packages are already tracked")
+            return 0
+        print(f"{len(missing)} new package(s): {', '.join(missing)}")
+        if args.dry_run:
+            return 0
+        if args.open_prs:
+            for b in missing:
+                open_add_pr(args.repo_root, b, index[b], base=args.base)
+        else:
+            add_packages(args.repo_root, missing, index)
+            print("materialized into the working tree — review, commit, and push")
         return 0
 
     updates = detect(args.repo_root, index)

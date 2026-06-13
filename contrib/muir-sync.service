@@ -1,0 +1,11 @@
+[Unit]
+Description=Mirror newly-installed AUR packages to muir (open audited PRs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Adjust the path if your clone isn't at ~/src/muir.
+ExecStart=%h/src/muir/contrib/muir-sync-installed
+# Uncomment to point elsewhere:
+# Environment=MUIR_REPO=%h/code/muir MUIR_BASE=master

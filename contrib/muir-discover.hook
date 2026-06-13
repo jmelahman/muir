@@ -1,0 +1,22 @@
+# OPTIONAL event-driven trigger. Install to:
+#   /etc/pacman.d/hooks/muir-discover.hook
+# and replace YOURUSER. Nudges the muir user service immediately after any
+# package install/upgrade, instead of waiting for the daily timer.
+#
+# Reliability notes:
+#   - The hook runs as root, so it pokes YOUR user systemd instance via
+#     --machine. Run `loginctl enable-linger YOURUSER` so that instance is
+#     always available (even with no active login session).
+#   - The actual git/gh work runs in the user service (muir-sync.service), NOT
+#     here — so your credentials, not root's, are used.
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = *
+
+[Action]
+Description = Queue newly-installed AUR packages for the muir mirror
+When = PostTransaction
+Exec = /usr/bin/systemctl --user --machine=YOURUSER@.host start --no-block muir-sync.service

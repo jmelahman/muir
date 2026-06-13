@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Open audited PRs for any AUR packages installed on this machine that aren't
+# mirrored yet. Run by muir-sync.timer (or a pacman hook). Runs as YOU, so it
+# uses your gh auth / ssh keys.
+#
+# Requirements: git, python, gh (authenticated), pacman, and a local clone of
+# the muir repo. Override paths via env:
+#   MUIR_REPO  (default: ~/src/muir)   MUIR_BASE (default: master)
+set -euo pipefail
+
+REPO="${MUIR_REPO:-$HOME/src/muir}"
+BASE="${MUIR_BASE:-master}"
+
+cd "$REPO"
+git fetch --quiet origin
+git checkout --quiet "$BASE"
+git pull --quiet --ff-only
+
+# --open-prs opens one audited "Add <pkg>" PR per newly-installed AUR package.
+python tools/sync.py --from-installed --open-prs --base "$BASE"

@@ -9,6 +9,7 @@ audit_backend = "openrouter"
 # Optional model override (OpenRouter slug, or Claude model id). Empty = default.
 audit_model = ""
 
-# Set true to ALSO require a CODEOWNERS approval on every PR (stricter; even
-# audit-clean PRs then wait for a human). Default false = auto-merge clean PRs.
-require_human_review = false
+# GitHub App ID of the muir bot. Every PR needs a code-owner review, but this
+# App bypasses it so the bot's vetted PRs auto-merge (human PRs still need you).
+# Leave 0 until the App exists — see .github/bot-app.md.
+bot_app_id = 0

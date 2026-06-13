@@ -22,15 +22,16 @@ variable "required_status_checks" {
   default     = ["gate", "terraform"]
 }
 
-variable "require_human_review" {
+variable "bot_app_id" {
   description = <<-EOT
-    If true, also require a CODEOWNERS approval on EVERY PR (stricter; even
-    audit-clean PRs then need a human). If false (default), the merge gate is the
-    `gate` status check alone — clean/risk:low PRs auto-merge with no human, and
-    flagged PRs are held because their `gate` check fails.
+    GitHub App ID of the muir bot. The branch ruleset requires a code-owner
+    review on every PR, but this App bypasses that — so the bot's audit-clean
+    update PRs auto-merge while all human contributions still need your review.
+    Leave 0 until the App exists (then NO PR can auto-merge — everything needs a
+    review). See .github/bot-app.md.
   EOT
-  type        = bool
-  default     = false
+  type        = number
+  default     = 0
 }
 
 variable "audit_backend" {

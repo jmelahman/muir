@@ -3,9 +3,9 @@ output "repository_full_name" {
   value       = github_repository.this.full_name
 }
 
-output "protected_branch" {
-  description = "Branch the protection rule applies to."
-  value       = github_branch_protection.default.pattern
+output "ruleset_bypass_configured" {
+  description = "Whether the bot App is set as a ruleset bypass actor (enables bot auto-merge)."
+  value       = var.bot_app_id > 0
 }
 
 output "required_status_checks" {

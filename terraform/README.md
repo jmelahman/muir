@@ -27,17 +27,18 @@ terraform apply
 | Resource | Purpose |
 |---|---|
 | `github_repository.this` | auto-merge on, squash-only, delete branch on merge |
-| `github_branch_protection.default` | require the `gate` status check (and CODEOWNERS review if `require_human_review = true`) |
+| `github_repository_ruleset.default` | require the `gate`+`terraform` checks **and** a code-owner review; the bot App (`bot_app_id`) bypasses the review |
 | `github_issue_label.this` | `risk:low`, `risk:high`, `audit:flagged` |
 | `github_actions_variable.*` | `MUIR_AUDIT_BACKEND`, `MUIR_AUDIT_MODEL` |
 
 ## Merge gate
 
-The single required check is **`gate`** (it aggregates the per-package matrix
-jobs, whose check names are dynamic). `gate` fails for audit-flagged PRs — which
-is what holds them — and passes for clean / `risk:low` PRs, which then
-auto-merge. So the default needs **no** human review. Flip `require_human_review`
-to also gate every PR on a CODEOWNERS approval.
+Two things gate the default branch: the **`gate`** status check (aggregates the
+per-package matrix jobs; fails for audit-flagged PRs, which holds them) and a
+**code-owner review**. The muir bot App is a ruleset **bypass actor**, so its
+audit-clean PRs auto-merge without a review while every human PR waits for your
+approval. Set `bot_app_id` (see `.github/bot-app.md`); until then nothing
+auto-merges — every PR needs a review.
 
 ## Secrets (set out of band)
 

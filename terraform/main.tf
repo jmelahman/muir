@@ -19,32 +19,55 @@ resource "github_repository" "this" {
   }
 }
 
-# Branch protection on the default branch.
+# Default-branch ruleset.
 #
-# The `gate` status check is the real merge gate: it fails for audit-flagged
-# PRs (holding them) and passes for clean / risk:low PRs (which then auto-merge).
-resource "github_branch_protection" "default" {
-  repository_id = github_repository.this.node_id
-  pattern       = var.default_branch
+# Requires the status checks AND a code-owner (you) approval on every PR — so all
+# contributions go through you. The bot App (var.bot_app_id) is a bypass actor,
+# so its audit-clean update PRs auto-merge without that review. The `gate` check
+# still independently blocks audit-flagged PRs.
+resource "github_repository_ruleset" "default" {
+  name        = "default-branch"
+  repository  = github_repository.this.name
+  target      = "branch"
+  enforcement = "active"
 
-  required_status_checks {
-    strict   = true # PRs must be up to date with the base branch
-    contexts = var.required_status_checks
-  }
-
-  # Optional, off by default — see require_human_review. When on, this needs the
-  # CODEOWNERS file in the repo root.
-  dynamic "required_pull_request_reviews" {
-    for_each = var.require_human_review ? [1] : []
-    content {
-      require_code_owner_reviews      = true
-      required_approving_review_count = 1
+  conditions {
+    ref_name {
+      include = ["~DEFAULT_BRANCH"]
+      exclude = []
     }
   }
 
-  enforce_admins      = false
-  allows_force_pushes = false
-  allows_deletions    = false
+  rules {
+    deletion         = true # block branch deletion
+    non_fast_forward = true # block force-push
+
+    pull_request {
+      required_approving_review_count = 1
+      require_code_owner_review       = true
+      dismiss_stale_reviews_on_push   = true
+    }
+
+    required_status_checks {
+      strict_required_status_checks_policy = true # up to date with base
+      dynamic "required_check" {
+        for_each = toset(var.required_status_checks)
+        content {
+          context = required_check.value
+        }
+      }
+    }
+  }
+
+  # The bot App bypasses required review -> its vetted PRs auto-merge.
+  dynamic "bypass_actors" {
+    for_each = var.bot_app_id > 0 ? [1] : []
+    content {
+      actor_id    = var.bot_app_id
+      actor_type  = "Integration"
+      bypass_mode = "always"
+    }
+  }
 }
 
 # Labels applied by the audit workflow / triage.

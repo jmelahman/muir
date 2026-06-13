@@ -8,18 +8,25 @@ changes merge, then get built into a **signed pacman repo**. Net effect:
 **Pipeline:** detect update → PR → triage + LLM audit (`gate`) → merge if clean
 → build + GPG-sign → publish `[muir]` repo on GitHub Releases.
 
+**Merge policy:** the bot's audit-clean PRs **auto-merge** (a GitHub App bypasses
+review); **all human contributions require your code-owner review** — enforced by
+a branch ruleset (see [`.github/bot-app.md`](.github/bot-app.md)).
+
 ## Adopt (fork-and-go)
 
 1. **Use this template** / fork it.
 2. `git clone … && ./bootstrap.sh` — rewrites `CODEOWNERS`, Terraform vars, and
    the pacman stanza from your fork's remote. Everything else derives from the
    repo automatically.
-3. **Secrets** (`gh secret set …`): `MUIR_PR_TOKEN` (PAT for PRs), one audit
-   backend key — `OPENROUTER_API_KEY` *or* `CLAUDE_CODE_OAUTH_TOKEN` *or*
-   `ANTHROPIC_API_KEY` — and `MUIR_GPG_PRIVATE_KEY` (signing; see [`keys/`](keys/)).
-4. **Configure the repo**: `cd terraform && terraform init &&
+3. **Bot App** — create the muir GitHub App so its vetted PRs auto-merge while
+   human PRs need your review; set `MUIR_APP_ID` + `MUIR_APP_PRIVATE_KEY` and
+   `bot_app_id` in tfvars. See [`.github/bot-app.md`](.github/bot-app.md).
+4. **Secrets** (`gh secret set …`): one audit backend key — `OPENROUTER_API_KEY`
+   *or* `CLAUDE_CODE_OAUTH_TOKEN` *or* `ANTHROPIC_API_KEY` — and
+   `MUIR_GPG_PRIVATE_KEY` (signing; see [`keys/`](keys/)).
+5. **Configure the repo**: `cd terraform && terraform init &&
    terraform import github_repository.this <repo> && terraform apply`.
-5. **Seed** from this machine: `python tools/sync.py --from-installed`, then
+6. **Seed** from this machine: `python tools/sync.py --from-installed`, then
    commit + push. Enable the timer in [`contrib/`](contrib/) to track new installs.
 
 ## Use the repo

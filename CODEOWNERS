@@ -1,9 +1,7 @@
-# Every mirrored package change requires owner review *when held*.
+# The default-branch ruleset (see terraform/) requires a review from the owner
+# below on EVERY pull request — so all contributions go through you. The muir
+# bot App is a ruleset bypass actor, so its audit-clean update PRs auto-merge
+# without this review; everyone else's PRs wait for your approval.
 #
-# Combined with branch protection requiring the `audit` check, this gives the
-# merge policy: audit-clean / risk:low PRs satisfy the checks and auto-merge;
-# PRs the audit flags fail the `audit` check and an owner must review before
-# they can merge.
-#
-# Replace with the real maintainer handle(s).
+# bootstrap.sh rewrites this to your fork's owner.
 * @jmelahman

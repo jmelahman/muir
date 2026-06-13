@@ -21,3 +21,9 @@ __pycache__/
 triage*.json
 audit.json
 /opt/venv/
+
+# terraform (keep .terraform.lock.hcl; ignore state + local vars)
+**/.terraform/
+*.tfstate
+*.tfstate.*
+terraform/terraform.tfvars

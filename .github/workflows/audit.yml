@@ -3,12 +3,14 @@ name: audit
 # PR gate: field-based triage -> LLM audit (high-risk only) -> build verification.
 # clean / risk:low  -> all checks pass, PR is auto-merge-eligible
 # suspicious/malicious -> audit check fails + audit:flagged label -> held for review
+#
+# The single required status check is `gate` (it aggregates the matrix jobs,
+# whose check names are dynamic per package).
+# No path filter: the workflow runs on every PR so the required `gate` check
+# always reports. The `detect` job no-ops when no package directory changed, and
+# the heavy jobs are skipped — `gate` still passes.
 on:
   pull_request:
-    paths:
-      - "*/PKGBUILD"
-      - "*/.SRCINFO"
-      - "*/*.install"
 
 permissions:
   contents: read
@@ -43,6 +45,7 @@ jobs:
     strategy:
       matrix:
         pkg: ${{ fromJson(needs.detect.outputs.packages) }}
+      fail-fast: false
     steps:
       - run: pacman -Sy --noconfirm --needed git python pacman-contrib jq
       - uses: actions/checkout@v4
@@ -61,18 +64,22 @@ jobs:
           path: triage-${{ matrix.pkg }}.json
 
   # ---- LLM audit (runs always; self-skips when triage says low risk) -------
-  # This job is the required "audit" status check. It holds the only API key.
+  # Backend is selected by `MIUR_AUDIT_BACKEND` (repo variable), default
+  # openrouter. audit.py auto-detects from available credentials otherwise.
   audit:
     needs: [detect, triage]
     if: needs.detect.outputs.packages != '[]'
     runs-on: ubuntu-latest
     container: archlinux:latest
+    env:
+      MIUR_AUDIT_BACKEND: ${{ vars.MIUR_AUDIT_BACKEND || 'openrouter' }}
+      MIUR_AUDIT_MODEL: ${{ vars.MIUR_AUDIT_MODEL }}
     strategy:
       matrix:
         pkg: ${{ fromJson(needs.detect.outputs.packages) }}
       fail-fast: false
     steps:
-      - run: pacman -Sy --noconfirm --needed git python python-pip github-cli jq
+      - run: pacman -Sy --noconfirm --needed git python github-cli jq
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -80,16 +87,28 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: triage-${{ matrix.pkg }}
-      - name: Install SDK
+      # Only the subscription-token backend needs the Claude CLI (Node).
+      - name: Install Claude CLI
+        if: env.MIUR_AUDIT_BACKEND == 'claude-cli'
         run: |
-          python -m venv /opt/venv
-          /opt/venv/bin/pip install -q anthropic
+          pacman -S --noconfirm --needed nodejs npm
+          npm install -g @anthropic-ai/claude-code
+      # Only the direct Anthropic backend needs the SDK.
+      - name: Install Anthropic SDK
+        if: env.MIUR_AUDIT_BACKEND == 'anthropic'
+        run: |
+          pacman -S --noconfirm --needed python-pip
+          python -m venv /opt/venv && /opt/venv/bin/pip install -q anthropic
       - name: Audit ${{ matrix.pkg }}
         env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          /opt/venv/bin/python tools/audit.py \
+          PY=python
+          [ -x /opt/venv/bin/python ] && PY=/opt/venv/bin/python
+          "$PY" tools/audit.py \
             --pkg "${{ matrix.pkg }}" \
             --base-ref "${{ github.event.pull_request.base.sha }}" \
             --triage "triage-${{ matrix.pkg }}.json" \
@@ -97,7 +116,7 @@ jobs:
 
   # ---- build verification (NO secrets; executes untrusted PKGBUILD code) ---
   # Security boundary: this job runs makepkg/namcap on untrusted package code,
-  # so it deliberately has no access to ANTHROPIC_API_KEY or write tokens.
+  # so it deliberately has no access to any audit credential or write token.
   build-check:
     needs: detect
     if: needs.detect.outputs.packages != '[]'
@@ -126,3 +145,22 @@ jobs:
       - name: Lint with namcap
         working-directory: ${{ matrix.pkg }}
         run: namcap -i PKGBUILD || true
+
+  # ---- single stable required check ----------------------------------------
+  # Matrix job check names are dynamic (e.g. "audit (foo)"), so branch
+  # protection requires THIS aggregate context instead. Passes for non-package
+  # PRs (jobs skipped) and fails if any gating job failed.
+  gate:
+    needs: [detect, triage, audit, build-check]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate gating jobs
+        run: |
+          echo "triage=${{ needs.triage.result }} audit=${{ needs.audit.result }} build=${{ needs.build-check.result }}"
+          for r in "${{ needs.triage.result }}" "${{ needs.audit.result }}" "${{ needs.build-check.result }}"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::a gating job did not pass"; exit 1
+            fi
+          done
+          echo "gate passed"

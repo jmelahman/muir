@@ -37,24 +37,42 @@ Each top-level directory holding a `.SRCINFO` is one tracked package. The repo
 | `tools/lib/` | `.SRCINFO` parsing, `vercmp`, PKGBUILD function extraction |
 | `tools/tests/` | unit tests + fixtures (`python tools/tests/run.py`) |
 | `.github/workflows/sync.yml` | scheduled detector |
-| `.github/workflows/audit.yml` | PR CI: `triage` → `audit` → `build-check` |
+| `.github/workflows/audit.yml` | PR CI: `triage` → `audit` → `build-check` → `gate` |
+| `terraform/` | repo config: branch protection, labels, auto-merge, Actions vars |
+
+## Audit backend
+
+`tools/audit.py` is provider-pluggable; it picks a backend by `MIUR_AUDIT_BACKEND`
+(repo Actions variable) or auto-detects from whichever credential is present:
+
+| Backend | Credential | Notes |
+|---|---|---|
+| `openrouter` (default) | `OPENROUTER_API_KEY` | OpenAI-compatible, one key → many models. Stdlib only (no install in CI). Set the model via `MIUR_AUDIT_MODEL` (an OpenRouter slug). |
+| `claude-cli` | `CLAUDE_CODE_OAUTH_TOKEN` | Headless `claude -p` on your Claude **subscription** — no metered API key. Token from `claude setup-token`. |
+| `anthropic` | `ANTHROPIC_API_KEY` | Direct Anthropic API (SDK, structured output, prompt caching). |
+
+A Claude PR *review* (via the Claude GitHub app/action) posts comments but cannot
+itself block a merge, so the deterministic `audit.py` exit code stays the gate;
+the subscription `claude-cli` backend is how you run that audit without a metered
+key.
 
 ## Setup
 
+Repository configuration (branch protection, labels, auto-merge, Actions
+variables) is managed by Terraform — see [`terraform/`](terraform/). Then:
+
 1. **Seed packages** (one-off): `python tools/sync.py --add <pkg> [<pkg>...]`,
    then commit the new directories.
-2. **Secrets** (repo settings → Secrets):
-   - `ANTHROPIC_API_KEY` — used only by the `audit` job.
-   - `MIUR_PR_TOKEN` — a PAT with `contents`+`pull-requests` write. Required so
+2. **Secrets** (set with `gh secret set …` — *not* in Terraform state):
+   - `MIUR_PR_TOKEN` — PAT with `contents`+`pull-requests` write. Required so
      sync's PRs trigger CI (PRs opened with the default `GITHUB_TOKEN` do not).
-3. **Branch protection** on the default branch — require these status checks:
-   `audit` and `build-check`, plus CODEOWNERS review. Enable **"Allow
-   auto-merge"** in repo settings.
-4. **CODEOWNERS** — set the real maintainer handle.
+   - one backend credential from the table above.
+3. **Branch protection** — Terraform requires the single `gate` check (it
+   aggregates the per-package matrix jobs) and enables auto-merge.
 
-With this in place: `risk:low` and audit-`clean` PRs satisfy all required checks
-and auto-merge; `suspicious`/`malicious` PRs fail the `audit` check, get the
-`audit:flagged` label and a findings comment, and wait for an owner.
+With this in place: `risk:low` and audit-`clean` PRs satisfy `gate` and
+auto-merge; `suspicious`/`malicious` PRs fail `gate`, get the `audit:flagged`
+label and a findings comment, and are held until a maintainer acts.
 
 ### Security boundary
 

@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and adjust. All values have sane defaults.
+
+github_owner    = "jmelahman"
+repository_name = "muir"
+default_branch  = "master"
+
+# Audit backend: "openrouter" | "claude-cli" | "anthropic"
+audit_backend = "openrouter"
+# Optional model override (OpenRouter slug, or Claude model id). Empty = default.
+audit_model = ""
+
+# Set true to ALSO require a CODEOWNERS approval on every PR (stricter; even
+# audit-clean PRs then wait for a human). Default false = auto-merge clean PRs.
+require_human_review = false

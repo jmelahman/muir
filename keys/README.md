@@ -5,8 +5,8 @@ the **public** key here so users can trust it:
 
 ```sh
 # On the machine that holds the key:
-gpg --armor --export <KEYID> > keys/muir.pub
-git add keys/muir.pub && git commit -m "Add muir signing public key" && git push
+gpg --armor --export <KEYID> > keys/signing.pub
+git add keys/signing.pub && git commit -m "Add muir signing public key" && git push
 ```
 
 The **private** key never lives in the repo — it's a CI secret
@@ -28,12 +28,12 @@ gpg --armor --export-secret-keys "$KEYID" | gh secret set MUIR_GPG_PRIVATE_KEY
 # (if you set a passphrase) gh secret set MUIR_GPG_PASSPHRASE
 
 # Public key -> this directory
-gpg --armor --export "$KEYID" > keys/muir.pub
+gpg --armor --export "$KEYID" > keys/signing.pub
 ```
 
 ## Trusting it on each machine
 
 ```sh
-sudo pacman-key --add keys/muir.pub          # or: curl the raw URL
+sudo pacman-key --add keys/signing.pub          # or: curl the raw URL
 sudo pacman-key --lsign-key "$KEYID"
 ```

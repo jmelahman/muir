@@ -1,0 +1,9 @@
+# Every mirrored package change requires owner review *when held*.
+#
+# Combined with branch protection requiring the `audit` check, this gives the
+# merge policy: audit-clean / risk:low PRs satisfy the checks and auto-merge;
+# PRs the audit flags fail the `audit` check and an owner must review before
+# they can merge.
+#
+# Replace with the real maintainer handle(s).
+* @jmelahman

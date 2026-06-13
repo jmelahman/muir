@@ -1,0 +1,128 @@
+name: audit
+
+# PR gate: field-based triage -> LLM audit (high-risk only) -> build verification.
+# clean / risk:low  -> all checks pass, PR is auto-merge-eligible
+# suspicious/malicious -> audit check fails + audit:flagged label -> held for review
+on:
+  pull_request:
+    paths:
+      - "*/PKGBUILD"
+      - "*/.SRCINFO"
+      - "*/*.install"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # ---- determine which package dir(s) the PR touches -----------------------
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.find.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: find
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          pkgs=$(git diff --name-only "$BASE...HEAD" \
+                  | awk -F/ 'NF>1 {print $1}' | sort -u \
+                  | while read -r d; do [ -f "$d/.SRCINFO" ] && echo "$d"; done \
+                  | jq -R . | jq -cs .)
+          echo "packages=${pkgs:-[]}" >> "$GITHUB_OUTPUT"
+
+  # ---- field-based triage (deterministic, no LLM cost) ---------------------
+  triage:
+    needs: detect
+    if: needs.detect.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    strategy:
+      matrix:
+        pkg: ${{ fromJson(needs.detect.outputs.packages) }}
+    steps:
+      - run: pacman -Sy --noconfirm --needed git python pacman-contrib jq
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Triage ${{ matrix.pkg }}
+        run: |
+          python tools/triage.py \
+            --pkg "${{ matrix.pkg }}" \
+            --base-ref "${{ github.event.pull_request.base.sha }}" \
+            -o "triage-${{ matrix.pkg }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: triage-${{ matrix.pkg }}
+          path: triage-${{ matrix.pkg }}.json
+
+  # ---- LLM audit (runs always; self-skips when triage says low risk) -------
+  # This job is the required "audit" status check. It holds the only API key.
+  audit:
+    needs: [detect, triage]
+    if: needs.detect.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    strategy:
+      matrix:
+        pkg: ${{ fromJson(needs.detect.outputs.packages) }}
+      fail-fast: false
+    steps:
+      - run: pacman -Sy --noconfirm --needed git python python-pip github-cli jq
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/download-artifact@v4
+        with:
+          name: triage-${{ matrix.pkg }}
+      - name: Install SDK
+        run: |
+          python -m venv /opt/venv
+          /opt/venv/bin/pip install -q anthropic
+      - name: Audit ${{ matrix.pkg }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          /opt/venv/bin/python tools/audit.py \
+            --pkg "${{ matrix.pkg }}" \
+            --base-ref "${{ github.event.pull_request.base.sha }}" \
+            --triage "triage-${{ matrix.pkg }}.json" \
+            --pr "${{ github.event.pull_request.number }}"
+
+  # ---- build verification (NO secrets; executes untrusted PKGBUILD code) ---
+  # Security boundary: this job runs makepkg/namcap on untrusted package code,
+  # so it deliberately has no access to ANTHROPIC_API_KEY or write tokens.
+  build-check:
+    needs: detect
+    if: needs.detect.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        pkg: ${{ fromJson(needs.detect.outputs.packages) }}
+      fail-fast: false
+    steps:
+      - run: pacman -Sy --noconfirm --needed base-devel git namcap
+      - uses: actions/checkout@v4
+      # makepkg refuses to run as root; use an unprivileged build user.
+      - name: Prepare build user
+        run: |
+          useradd -m builder
+          chown -R builder "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Verify .SRCINFO matches PKGBUILD
+        working-directory: ${{ matrix.pkg }}
+        run: |
+          sudo -u builder makepkg --printsrcinfo > .SRCINFO.gen
+          diff -u .SRCINFO .SRCINFO.gen
+      - name: Lint with namcap
+        working-directory: ${{ matrix.pkg }}
+        run: namcap -i PKGBUILD || true

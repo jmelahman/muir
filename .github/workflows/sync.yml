@@ -1,0 +1,62 @@
+name: sync
+
+# Detect upstream AUR updates and open one PR per outdated package.
+on:
+  schedule:
+    - cron: "17 * * * *"   # hourly, offset to avoid the top-of-hour stampede
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Detect only; do not open PRs"
+        type: boolean
+        default: false
+
+concurrency:
+  group: aur-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install tooling
+        run: pacman -Sy --noconfirm --needed git python github-cli pacman-contrib
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Cache the AUR metadata-archive ETag so repeated runs only re-download
+      # when the archive actually changed (~5 min refresh upstream).
+      - name: Restore archive cache
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: aur-archive-${{ github.run_id }}
+          restore-keys: aur-archive-
+
+      - name: Configure git + auth
+        env:
+          # Use a PAT so the opened PR triggers the audit workflow.
+          # PRs created with the default GITHUB_TOKEN do NOT trigger CI.
+          GH_TOKEN: ${{ secrets.MIUR_PR_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name  "miur-bot"
+          git config --global user.email "miur-bot@users.noreply.github.com"
+
+      - name: Detect + open update PRs
+        env:
+          GH_TOKEN: ${{ secrets.MIUR_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          MIUR_CACHE: .cache
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python tools/sync.py --dry-run
+          else
+            python tools/sync.py --open-prs --base "${{ github.event.repository.default_branch }}"
+          fi

@@ -1,0 +1,17 @@
+pkgname=demo
+pkgver=1.0.0
+pkgrel=2
+arch=('x86_64')
+depends=('glibc')
+source=("https://example.com/demo-1.0.0.tar.gz")
+sha256sums=('cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc')
+
+build() {
+  cd "$srcdir/demo-$pkgver"
+  make
+}
+
+package() {
+  cd "$srcdir/demo-$pkgver"
+  make DESTDIR="$pkgdir" install
+}

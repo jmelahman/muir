@@ -13,3 +13,11 @@
 pkg/
 src/
 .claude/settings.local.json
+
+# tooling artifacts
+__pycache__/
+*.pyc
+.cache/
+triage*.json
+audit.json
+/opt/venv/
